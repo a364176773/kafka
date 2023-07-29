@@ -662,12 +662,14 @@ object LocalLog extends Logging {
     val dirName = dir.getName
     if (dirName == null || dirName.isEmpty || !dirName.contains('-'))
       throw exception(dir)
-    if (dirName.endsWith(DeleteDirSuffix) && !DeleteDirPattern.matcher(dirName).matches ||
-      dirName.endsWith(FutureDirSuffix) && !FutureDirPattern.matcher(dirName).matches)
+    val isDeleteDir = dirName.endsWith(DeleteDirSuffix)
+    val isFutureDir = dirName.endsWith(FutureDirSuffix)
+    if ((isDeleteDir && !DeleteDirPattern.matcher(dirName).matches) ||
+      (isFutureDir && !FutureDirPattern.matcher(dirName).matches))
       throw exception(dir)
 
     val name: String =
-      if (dirName.endsWith(DeleteDirSuffix) || dirName.endsWith(FutureDirSuffix)) dirName.substring(0, dirName.lastIndexOf('.'))
+      if (isDeleteDir || isFutureDir) dirName.substring(0, dirName.lastIndexOf('.'))
       else dirName
 
     val index = name.lastIndexOf('-')
