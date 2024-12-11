@@ -24,6 +24,7 @@ import kafka.log.{LogManager, OffsetResultHolder, UnifiedLog}
 import kafka.server.HostedPartition.Online
 import kafka.server.QuotaFactory.QuotaManagers
 import kafka.server.ReplicaManager.{AtMinIsrPartitionCountMetricName, FailedIsrUpdatesPerSecMetricName, IsrExpandsPerSecMetricName, IsrShrinksPerSecMetricName, LeaderCountMetricName, OfflineReplicaCountMetricName, PartitionCountMetricName, PartitionsWithLateTransactionsCountMetricName, ProducerIdCountMetricName, ReassigningPartitionsMetricName, UnderMinIsrPartitionCountMetricName, UnderReplicatedPartitionsMetricName, createLogReadResult, isListOffsetsTimestampUnsupported}
+import kafka.server.cluster.DiskCheckHookImpl
 import kafka.server.metadata.ZkMetadataCache
 import kafka.server.share.DelayedShareFetch
 import kafka.utils._
@@ -293,7 +294,7 @@ class ReplicaManager(val config: KafkaConfig,
                      val defaultActionQueue: ActionQueue = new DelayedActionQueue
                      ) extends Logging {
   private val metricsGroup = new KafkaMetricsGroup(this.getClass)
-
+  private val diskCheckHook = new DiskCheckHookImpl()
   val delayedProducePurgatory = delayedProducePurgatoryParam.getOrElse(
     new DelayedOperationPurgatory[DelayedProduce](
       "Produce", config.brokerId,
@@ -1460,6 +1461,8 @@ class ReplicaManager(val config: KafkaConfig,
       } else {
         try {
           val partition = getPartitionOrException(topicPartition)
+          val logDir = getLogDir(topicPartition)
+          diskCheckHook.beforeDiskCheck(logDir.get)
           val info = partition.appendRecordsToLeader(records, origin, requiredAcks, requestLocal,
             verificationGuards.getOrElse(topicPartition, VerificationGuard.SENTINEL))
           val numAppendedMessages = info.numMessages
