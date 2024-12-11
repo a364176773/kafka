@@ -31,9 +31,6 @@ import org.apache.kafka.common.errors.RecordTooLargeException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/**
- * @author jianbin@apache.org
- */
 public class DiskCheckHookImpl implements DiskCheckHook {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(DiskCheckHookImpl.class);

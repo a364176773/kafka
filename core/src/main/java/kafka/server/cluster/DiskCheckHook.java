@@ -16,9 +16,6 @@
  */
 package kafka.server.cluster;
 
-/**
- * @author jianbin@apache.org
- */
 public interface DiskCheckHook {
     void beforeDiskCheck(String directory);
 }
