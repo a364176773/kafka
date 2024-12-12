@@ -40,7 +40,7 @@ public class DiskCheckHookImpl implements DiskCheckHook {
     private static final Map<String, BigDecimal> DISK_FREE_PERCENTAGE = new ConcurrentHashMap<>();
 
     private static final BigDecimal THRESHOLD =
-        BigDecimal.valueOf(Long.parseLong(System.getProperty("disk.threshold", "95")));
+        BigDecimal.valueOf(Long.parseLong(System.getProperty("disk.threshold", "100")));
 
     @Override
     public void beforeDiskCheck(String directory) {
