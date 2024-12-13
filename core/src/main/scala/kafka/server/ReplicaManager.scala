@@ -26,6 +26,7 @@ import kafka.server.HostedPartition.Online
 import kafka.server.QuotaFactory.QuotaManagers
 import kafka.server.ReplicaManager.{AtMinIsrPartitionCountMetricName, FailedIsrUpdatesPerSecMetricName, IsrExpandsPerSecMetricName, IsrShrinksPerSecMetricName, LeaderCountMetricName, OfflineReplicaCountMetricName, PartitionCountMetricName, PartitionsWithLateTransactionsCountMetricName, ProducerIdCountMetricName, ReassigningPartitionsMetricName, UnderMinIsrPartitionCountMetricName, UnderReplicatedPartitionsMetricName, createLogReadResult}
 import kafka.server.checkpoints.{LazyOffsetCheckpoints, OffsetCheckpointFile, OffsetCheckpoints}
+import kafka.server.cluster.DiskCheckHookImpl
 import kafka.server.metadata.ZkMetadataCache
 import kafka.utils.Implicits._
 import kafka.utils._
@@ -314,6 +315,8 @@ class ReplicaManager(val config: KafkaConfig,
   protected val stateChangeLogger = new StateChangeLogger(localBrokerId, inControllerContext = false, None)
 
   private var logDirFailureHandler: LogDirFailureHandler = _
+
+  private val diskCheckHook = new DiskCheckHookImpl()
 
   private class LogDirFailureHandler(name: String, haltBrokerOnDirFailure: Boolean) extends ShutdownableThread(name) {
     override def doWork(): Unit = {
@@ -640,6 +643,7 @@ class ReplicaManager(val config: KafkaConfig,
   def createPartition(topicPartition: TopicPartition): Partition = {
     val partition = Partition(topicPartition, time, this)
     allPartitions.put(topicPartition, HostedPartition.Online(partition))
+    diskCheckHook.registry(partition.log.get.parentDir)
     partition
   }
 
@@ -1406,6 +1410,7 @@ class ReplicaManager(val config: KafkaConfig,
       } else {
         try {
           val partition = getPartitionOrException(topicPartition)
+          diskCheckHook.beforeDiskCheck(getLogDir(topicPartition).getOrElse(""))
           val info = partition.appendRecordsToLeader(records, origin, requiredAcks, requestLocal,
             verificationGuards.getOrElse(topicPartition, VerificationGuard.SENTINEL))
           val numAppendedMessages = info.numMessages
@@ -1967,6 +1972,7 @@ class ReplicaManager(val config: KafkaConfig,
 
               case HostedPartition.None =>
                 val partition = Partition(topicPartition, time, this)
+                diskCheckHook.registry(partition.log.get.parentDir)
                 allPartitions.putIfNotExists(topicPartition, HostedPartition.Online(partition))
                 Some(partition)
             }
@@ -2455,6 +2461,7 @@ class ReplicaManager(val config: KafkaConfig,
   def markPartitionOffline(tp: TopicPartition): Unit = replicaStateChangeLock synchronized {
     allPartitions.get(tp) match {
       case HostedPartition.Online(partition) =>
+        diskCheckHook.registry(partition.log.get.parentDir)
         allPartitions.put(tp, HostedPartition.Offline(Some(partition)))
         partition.markOffline()
       case _ =>
@@ -2684,6 +2691,7 @@ class ReplicaManager(val config: KafkaConfig,
             s"directory.")
           val partition = Partition(new TopicIdPartition(topicId, tp), time, this)
           allPartitions.put(tp, HostedPartition.Online(partition))
+          diskCheckHook.registry(partition.log.get.parentDir)
           Some(partition, true)
         }
 
@@ -2706,6 +2714,7 @@ class ReplicaManager(val config: KafkaConfig,
         }
         // it's a partition that we don't know about yet, so create it and mark it online
         val partition = Partition(new TopicIdPartition(topicId, tp), time, this)
+        diskCheckHook.registry(partition.log.get.parentDir)
         allPartitions.put(tp, HostedPartition.Online(partition))
         Some(partition, true)
     }
