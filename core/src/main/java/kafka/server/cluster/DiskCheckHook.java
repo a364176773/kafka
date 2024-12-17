@@ -16,6 +16,11 @@
  */
 package kafka.server.cluster;
 
+
 public interface DiskCheckHook {
-    void beforeDiskCheck(String directory);
+
+	void beforeDiskCheck(String directory);
+
+	void registry(String directory);
+
 }

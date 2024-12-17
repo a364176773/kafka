@@ -21,6 +21,7 @@ import com.yammer.metrics.core.MetricName
 import kafka.common.{OffsetsOutOfOrderException, UnexpectedAppendOffsetException}
 import kafka.log.LocalLog.nextOption
 import kafka.log.remote.RemoteLogManager
+import kafka.server.cluster.DiskCheckHookImpl
 import kafka.server.{BrokerTopicMetrics, BrokerTopicStats, RequestLocal}
 import kafka.utils._
 import org.apache.kafka.common.errors._
@@ -2022,6 +2023,7 @@ object UnifiedLog extends Logging {
     ).load()
     val localLog = new LocalLog(dir, config, segments, offsets.recoveryPoint,
       offsets.nextOffsetMetadata, scheduler, time, topicPartition, logDirFailureChannel)
+    DiskCheckHookImpl.getInstance().registry(localLog.parentDir)
     new UnifiedLog(offsets.logStartOffset,
       localLog,
       brokerTopicStats,

@@ -33,45 +33,80 @@ import org.slf4j.LoggerFactory;
 
 public class DiskCheckHookImpl implements DiskCheckHook {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(DiskCheckHookImpl.class);
+	private static final Logger LOGGER = LoggerFactory.getLogger(DiskCheckHookImpl.class);
 
-    private static final ScheduledExecutorService SCHEDULED_EXECUTOR_SERVICE = Executors.newScheduledThreadPool(1);
+	private static final ScheduledExecutorService SCHEDULED_EXECUTOR_SERVICE = Executors.newScheduledThreadPool(1);
 
-    private static final Map<String, BigDecimal> DISK_FREE_PERCENTAGE = new ConcurrentHashMap<>();
+	private static final Map<String, BigDecimal> DISK_FREE_PERCENTAGE = new ConcurrentHashMap<>();
 
-    private static final BigDecimal THRESHOLD =
-        BigDecimal.valueOf(Long.parseLong(System.getProperty("disk.threshold", "95")));
+    private static volatile BigDecimal THRESHOLD;
 
-    @Override
-    public void beforeDiskCheck(String directory) {
-        if (directory == null || directory.isEmpty()) {
-            return;
+    private static final int INTERVAL = Integer.parseInt(System.getProperty("disk.check.interval", "60"));
+
+    static {
+        String threshold = System.getProperty("disk.threshold", "100");
+        try {
+            long value = Long.parseLong(threshold);
+            if (value < 100L) {
+                THRESHOLD = BigDecimal.valueOf(value);
+            }
+        } catch (NumberFormatException e) {
+            LOGGER.error("Failed to parse disk threshold value: {}", threshold, e);
         }
+    }
+
+	@Override
+    public void beforeDiskCheck(String directory) {
+		if (THRESHOLD == null || directory == null || directory.isEmpty()) {
+			return;
+		}
         BigDecimal bigDecimal = DISK_FREE_PERCENTAGE.computeIfAbsent(directory, k -> {
-            SCHEDULED_EXECUTOR_SERVICE.scheduleAtFixedRate(() -> {
-                try {
-                    BigDecimal remaining = getDiskSpaceUsagePercentage(directory);
-                    LOGGER.info("directory: {}, Disk usage percentage: {}%", directory,remaining);
-                    DISK_FREE_PERCENTAGE.put(directory, remaining);
-                } catch (IOException e) {
-                    LOGGER.error("Failed to get disk usage percentage, directory: {},", directory, e);
-                }
-            }, 0, 1, TimeUnit.MINUTES);
-            return BigDecimal.valueOf(0);
-        });
+	       // registry(unifiedLog);
+			return new BigDecimal(0);
+		});
         int comparisonResult = bigDecimal.compareTo(THRESHOLD);
         if (comparisonResult > 0) {
             throw new RecordTooLargeException("Disk usage is above the threshold: " + bigDecimal + "%");
         }
     }
 
-    public BigDecimal getDiskSpaceUsagePercentage(String directory) throws IOException {
-        FileStore fileStore = Files.getFileStore(Paths.get(directory));
-        long totalSpace = fileStore.getTotalSpace();
-        long usableSpace = fileStore.getUsableSpace();
-        long usedSpace = totalSpace - usableSpace;
-        return BigDecimal.valueOf(usedSpace).multiply(BigDecimal.valueOf(100)).divide(BigDecimal.valueOf(totalSpace), 2,
-            RoundingMode.HALF_UP);
+    @Override
+    public void registry(String directory) {
+        if (THRESHOLD == null || directory == null || directory.isEmpty()) {
+            return;
+        }
+        BigDecimal bigDecimal = DISK_FREE_PERCENTAGE.get(directory);
+        if (bigDecimal == null) {
+            DISK_FREE_PERCENTAGE.computeIfAbsent(directory, k -> {
+                LOGGER.info("Start to monitor disk usage percentage, directory: {}", directory);
+                SCHEDULED_EXECUTOR_SERVICE.scheduleAtFixedRate(() -> {
+                    try {
+                        BigDecimal remaining = getDiskSpaceUsagePercentage(directory);
+                        LOGGER.info("directory: {}, Disk usage percentage: {}%", directory, remaining);
+                        DISK_FREE_PERCENTAGE.put(directory, remaining);
+                    } catch (IOException e) {
+                        LOGGER.error("Failed to get disk usage percentage, directory: {},", directory, e);
+                    }
+                }, INTERVAL, INTERVAL, TimeUnit.SECONDS);
+                return BigDecimal.valueOf(0);
+            });
+        }
     }
 
+	public BigDecimal getDiskSpaceUsagePercentage(String directory) throws IOException {
+		FileStore fileStore = Files.getFileStore(Paths.get(directory));
+		long totalSpace = fileStore.getTotalSpace();
+		long usableSpace = fileStore.getUsableSpace();
+		long usedSpace = totalSpace - usableSpace;
+		return BigDecimal.valueOf(usedSpace).multiply(BigDecimal.valueOf(100)).divide(BigDecimal.valueOf(totalSpace), 2,
+			RoundingMode.HALF_UP);
+	}
+
+	public static DiskCheckHookImpl getInstance() {
+		return InstanceHolder.INSTANCE;
+	}
+
+	public static class InstanceHolder {
+		private static final DiskCheckHookImpl INSTANCE = new DiskCheckHookImpl();
+	}
 }

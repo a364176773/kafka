@@ -26,7 +26,7 @@ import kafka.server.HostedPartition.Online
 import kafka.server.QuotaFactory.QuotaManagers
 import kafka.server.ReplicaManager.{AtMinIsrPartitionCountMetricName, FailedIsrUpdatesPerSecMetricName, IsrExpandsPerSecMetricName, IsrShrinksPerSecMetricName, LeaderCountMetricName, OfflineReplicaCountMetricName, PartitionCountMetricName, PartitionsWithLateTransactionsCountMetricName, ProducerIdCountMetricName, ReassigningPartitionsMetricName, UnderMinIsrPartitionCountMetricName, UnderReplicatedPartitionsMetricName, createLogReadResult}
 import kafka.server.checkpoints.{LazyOffsetCheckpoints, OffsetCheckpointFile, OffsetCheckpoints}
-import kafka.server.cluster.{DiskCheckHookImpl}
+import kafka.server.cluster.DiskCheckHookImpl
 import kafka.server.metadata.ZkMetadataCache
 import kafka.utils.Implicits._
 import kafka.utils._
@@ -292,7 +292,6 @@ class ReplicaManager(val config: KafkaConfig,
   val delayedRemoteFetchPurgatory = delayedRemoteFetchPurgatoryParam.getOrElse(
     DelayedOperationPurgatory[DelayedRemoteFetch](
       purgatoryName = "RemoteFetch", brokerId = config.brokerId))
-
   /* epoch of the controller that last changed the leader */
   @volatile private[server] var controllerEpoch: Int = KafkaController.InitialControllerEpoch
   protected val localBrokerId = config.brokerId
@@ -312,6 +311,8 @@ class ReplicaManager(val config: KafkaConfig,
   protected val stateChangeLogger = new StateChangeLogger(localBrokerId, inControllerContext = false, None)
 
   private var logDirFailureHandler: LogDirFailureHandler = _
+
+  private val diskCheckHook = DiskCheckHookImpl.getInstance()
 
   private class LogDirFailureHandler(name: String, haltBrokerOnDirFailure: Boolean) extends ShutdownableThread(name) {
     override def doWork(): Unit = {
@@ -1363,7 +1364,7 @@ class ReplicaManager(val config: KafkaConfig,
   private def isValidRequiredAcks(requiredAcks: Short): Boolean = {
     requiredAcks == -1 || requiredAcks == 1 || requiredAcks == 0
   }
-  private val diskCheckHook = new DiskCheckHookImpl()
+
   /**
    * Append the messages to the local replica logs
    */
@@ -1400,7 +1401,7 @@ class ReplicaManager(val config: KafkaConfig,
         try {
           val partition = getPartitionOrException(topicPartition)
           val logDir = getLogDir(topicPartition)
-          diskCheckHook.beforeDiskCheck(logDir.get)
+          diskCheckHook.beforeDiskCheck(logDir.getOrElse(""))
           val info = partition.appendRecordsToLeader(records, origin, requiredAcks, requestLocal,
             verificationGuards.getOrElse(topicPartition, VerificationGuard.SENTINEL))
           val numAppendedMessages = info.numMessages
