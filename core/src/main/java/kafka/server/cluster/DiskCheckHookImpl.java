@@ -23,10 +23,12 @@ import java.nio.file.FileStore;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import kafka.log.LogManager;
 import org.apache.kafka.common.errors.RecordTooLargeException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,11 +39,13 @@ public class DiskCheckHookImpl implements DiskCheckHook {
 
 	private static final ScheduledExecutorService SCHEDULED_EXECUTOR_SERVICE = Executors.newScheduledThreadPool(1);
 
-	private static final Map<String, BigDecimal> DISK_FREE_PERCENTAGE = new ConcurrentHashMap<>();
+	private static final Map<String, Boolean> DISK_STATUS = new ConcurrentHashMap<>();
 
     private static volatile BigDecimal THRESHOLD;
 
     private static final int INTERVAL = Integer.parseInt(System.getProperty("disk.check.interval", "60"));
+
+	private LogManager logManager;
 
     static {
         String threshold = System.getProperty("disk.threshold", "100");
@@ -60,13 +64,10 @@ public class DiskCheckHookImpl implements DiskCheckHook {
 		if (THRESHOLD == null || directory == null || directory.isEmpty()) {
 			return;
 		}
-        BigDecimal bigDecimal = DISK_FREE_PERCENTAGE.computeIfAbsent(directory, k -> {
-	       // registry(unifiedLog);
-			return new BigDecimal(0);
-		});
-        int comparisonResult = bigDecimal.compareTo(THRESHOLD);
-        if (comparisonResult > 0) {
-            throw new RecordTooLargeException("Disk usage is above the threshold: " + bigDecimal + "%");
+        Boolean pass = DISK_STATUS.computeIfAbsent(directory, k -> true);
+        if (!pass) {
+            throw new RecordTooLargeException(
+                "Insufficient disk space, stopping write operations to protect the broker");
         }
     }
 
@@ -75,20 +76,27 @@ public class DiskCheckHookImpl implements DiskCheckHook {
         if (THRESHOLD == null || directory == null || directory.isEmpty()) {
             return;
         }
-        BigDecimal bigDecimal = DISK_FREE_PERCENTAGE.get(directory);
-        if (bigDecimal == null) {
-            DISK_FREE_PERCENTAGE.computeIfAbsent(directory, k -> {
+        Boolean bool = DISK_STATUS.get(directory);
+        if (bool == null) {
+	        DISK_STATUS.computeIfAbsent(directory, k -> {
                 LOGGER.info("Start to monitor disk usage percentage, directory: {}", directory);
                 SCHEDULED_EXECUTOR_SERVICE.scheduleAtFixedRate(() -> {
                     try {
                         BigDecimal remaining = getDiskSpaceUsagePercentage(directory);
-                        LOGGER.info("directory: {}, Disk usage percentage: {}%", directory, remaining);
-                        DISK_FREE_PERCENTAGE.put(directory, remaining);
+	                    int comparisonResult = remaining.compareTo(THRESHOLD);
+                        if (comparisonResult > 0) {
+	                        LOGGER.error("directory: {}, Disk usage percentage: {}%, write operations are not allowed", directory, remaining);
+                            DISK_STATUS.put(directory, false);
+	                        Optional.ofNullable(logManager).ifPresent(LogManager::cleanupLogs);
+                        } else {
+	                        LOGGER.info("directory: {}, Disk usage percentage: {}%", directory, remaining);
+                            DISK_STATUS.put(directory, true);
+                        }
                     } catch (IOException e) {
                         LOGGER.error("Failed to get disk usage percentage, directory: {},", directory, e);
                     }
                 }, INTERVAL, INTERVAL, TimeUnit.SECONDS);
-                return BigDecimal.valueOf(0);
+                return true;
             });
         }
     }
@@ -100,6 +108,10 @@ public class DiskCheckHookImpl implements DiskCheckHook {
 		long usedSpace = totalSpace - usableSpace;
 		return BigDecimal.valueOf(usedSpace).multiply(BigDecimal.valueOf(100)).divide(BigDecimal.valueOf(totalSpace), 2,
 			RoundingMode.HALF_UP);
+	}
+
+	public  void setLogManager(LogManager logManager){
+		this.logManager = logManager;
 	}
 
 	public static DiskCheckHookImpl getInstance() {

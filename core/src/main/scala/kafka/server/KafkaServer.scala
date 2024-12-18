@@ -27,6 +27,7 @@ import kafka.log.remote.RemoteLogManager
 import kafka.metrics.KafkaMetricsReporter
 import kafka.network.{ControlPlaneAcceptor, DataPlaneAcceptor, RequestChannel, SocketServer}
 import kafka.raft.KafkaRaftManager
+import kafka.server.cluster.DiskCheckHookImpl
 import kafka.server.metadata.{OffsetTrackingListener, ZkConfigRepository, ZkMetadataCache}
 import kafka.utils._
 import kafka.zk.{AdminZkClient, BrokerInfo, KafkaZkClient}
@@ -323,6 +324,7 @@ class KafkaServer(
           config.usesTopicId)
         _brokerState = BrokerState.RECOVERY
         logManager.startup(zkClient.getAllTopicsInCluster())
+        DiskCheckHookImpl.getInstance().setLogManager(logManager)
 
         remoteLogManagerOpt = createRemoteLogManager()
 
